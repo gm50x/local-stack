@@ -1,0 +1,25 @@
+groups:
+  - name: AllInstances
+    rules:
+      - alert: InstanceDown
+        # Condition for alerting
+        expr: up == 0
+        for: 30s
+        # Annotation - additional informational labels to store more information
+        annotations:
+          title: "Instance {{ $labels.instance }} down"
+          description: "{{ $labels.instance }} of job {{ $labels.job }} has been down for more than 30 seconds."
+        # Labels - additional labels to be attached to the alert
+        labels:
+          severity: "critical"
+      - alert: HighMemoryUsage
+        # Condition for alerting
+        expr: sum (container_memory_working_set_bytes{name=~".+"}) by (name) / 1024 / 1024 > 320
+        for: 30s
+        # Annotation - additional informational labels to store more information
+        annotations:
+          title: "High Memory Usage on {{ $labels.name }}"
+          description: "{{ $labels.name }} has been consuming {{$value}} MiB of memory."
+        # Labels - additional labels to be attached to the alert
+        labels:
+          severity: "critical"

@@ -1,0 +1,99 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: dummy-q
+    folder: dummy-test
+    interval: 1m
+    rules:
+      - uid: fafe2595-3a2c-40f1-8ded-350f529a7e8b
+        title: High Memory Usage
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              datasource:
+                type: prometheus
+                uid: PBFA97CFB590B2093
+              disableTextWrap: false
+              editorMode: code
+              exemplar: false
+              expr: sum (container_memory_working_set_bytes {name!=""}) by(name)
+              format: time_series
+              fullMetaSearch: false
+              includeNullMetadata: true
+              instant: true
+              interval: ""
+              intervalMs: 1000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+              useBackend: false
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  reducer:
+                    params: []
+                    type: avg
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: $A / 1024 / 1024
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: math
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 250
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  reducer:
+                    params: []
+                    type: avg
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: __expr__
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 1m
+        annotations: {}
+        labels: {}
+        isPaused: false

@@ -1,0 +1,223 @@
+version: "3"
+
+networks:
+  default:
+    name: skywalker
+
+services:
+  traefik:
+    image: "traefik:v2.10"
+    container_name: "traefik"
+    command:
+      - "--api.insecure=true"
+      - "--api.dashboard=true"
+      - "--metrics"
+      - "--metrics.prometheus.buckets=0.1,0.3,1.2,5.0"
+      - "--providers.docker=true"
+      - "--providers.docker.network=skywalker"
+      - "--providers.docker.watch=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.mongodb.address=:27017"
+      - "--entrypoints.amqp.address=:5672"
+      - "--entrypoints.postgresql.address=:5432"
+      - "--entrypoints.verdaccio.address=:4873"
+      - "--entrypoints.loki.address=:3100"
+      - "--entrypoints.prometheus.address=:9090"
+      - "--entrypoints.index-tracker.address=:30001"
+    ports:
+      - "80:80"
+      - "27017:27017"
+      - "5672:5672"
+      - "5432:5432"
+      - "4873:4873"
+      - "3100:3100"
+      - "9090:9090"
+      - "30001:30001"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.localhost`)"
+      - "traefik.http.routers.traefik.entrypoints=web"
+      - "traefik.http.routers.traefik.service=traefik"
+      - "traefik.http.services.traefik.loadbalancer.server.port=8080"
+  promtail:
+    image: grafana/promtail:2.9.2
+    container_name: promtail
+    volumes:
+      - /var/log:/var/log
+    command: -config.file=/etc/promtail/config.yml
+  loki:
+    image: grafana/loki:2.9.2
+    container_name: loki
+    command: -config.file=/etc/loki/local-config.yaml
+    labels:
+      - "traefik.enable=true"
+      - "traefik.tcp.routers.loki.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.loki.entrypoints=loki"
+      - "traefik.tcp.routers.loki.service=loki"
+      - "traefik.tcp.services.loki.loadbalancer.server.port=3100"
+  cadvisor:
+    image: "google/cadvisor:latest"
+    container_name: cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+      - /mnt/docker_data/data/docker:/rootfs/var/lib/docker:ro
+      # sudo mount -t drvfs '\\wsl$\docker-desktop-data' /mnt/docker_data
+    labels:
+      - "traefik.enable=true"
+      # Prometheus Web
+      - "traefik.http.routers.cadvisor.rule=Host(`cadvisor.localhost`)"
+      - "traefik.http.routers.cadvisor.entrypoints=web"
+      - "traefik.http.routers.cadvisor.service=cadvisor"
+      - "traefik.http.services.cadvisor.loadbalancer.server.port=8080"
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.rootfs=/rootfs"
+      - "--path.sysfs=/host/sys"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    labels:
+      - "traefik.enable=true"
+      # Node Exporter Web
+      - "traefik.http.routers.node-exporter.rule=Host(`node-exporter.localhost`)"
+      - "traefik.http.routers.node-exporter.entrypoints=web"
+      - "traefik.http.routers.node-exporter.service=node-exporter"
+      - "traefik.http.services.node-exporter.loadbalancer.server.port=9100"
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    volumes:
+      - .docker/prometheus:/etc/prometheus
+    labels:
+      - "traefik.enable=true"
+      # Prometheus Web
+      - "traefik.http.routers.prometheus-ui.rule=Host(`prometheus.localhost`)"
+      - "traefik.http.routers.prometheus-ui.entrypoints=web"
+      - "traefik.http.routers.prometheus-ui.service=prometheus-ui"
+      - "traefik.http.services.prometheus-ui.loadbalancer.server.port=9090"
+      # Prometheus TCP
+      - "traefik.tcp.routers.prometheus.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.prometheus.entrypoints=prometheus"
+      - "traefik.tcp.routers.prometheus.service=prometheus"
+      - "traefik.tcp.services.prometheus.loadbalancer.server.port=9090"
+  alertmanager:
+    image: prom/alertmanager
+    container_name: alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    volumes:
+      - .docker/alertmanager:/etc/alertmanager
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.alertmanager.rule=Host(`alertmanager.localhost`)"
+      - "traefik.http.routers.alertmanager.entrypoints=web"
+      - "traefik.http.routers.alertmanager.service=alertmanager"
+      - "traefik.http.services.alertmanager.loadbalancer.server.port=9093"
+  grafana:
+    image: grafana/grafana-oss
+    container_name: grafana
+    environment:
+      GF_INSTALL_PLUGINS: "grafana-clock-panel,grafana-simple-json-datasource,grafana-piechart-panel"
+      GF_SECURITY_ADMIN_USER: gedai
+      GF_SECURITY_ADMIN_PASSWORD: gedai
+      # GF_AUTH_ANONYMOUS_ENABLED: true
+      # GF_AUTH_ANONYMOUS_ORG_ROLE: 'Admin'
+    volumes:
+      - .docker/grafana/datasources:/etc/grafana/provisioning/datasources
+      - .docker/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - .docker/grafana/.dashboards:/var/lib/grafana/dashboards
+    labels:
+      - "traefik.enable=true"
+      # Web Interface
+      - "traefik.http.routers.grafana.rule=Host(`grafana.localhost`)"
+      - "traefik.http.routers.grafana.entrypoints=web"
+      - "traefik.http.routers.grafana.service=grafana"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+  verdaccio:
+    image: verdaccio/verdaccio:5.27
+    container_name: verdaccio
+    environment:
+      VERDACCIO_USER_NAME: "gedai"
+    volumes:
+      - ".docker/verdaccio/conf:/verdaccio/conf"
+    labels:
+      - "traefik.enable=true"
+      # # npm publish
+      - "traefik.tcp.routers.verdaccio-server.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.verdaccio-server.entrypoints=verdaccio"
+      - "traefik.tcp.services.verdaccio-server.loadbalancer.server.port=4873"
+      - "traefik.tcp.routers.verdaccio-server.service=verdaccio-server"
+      # web:
+      - "traefik.http.routers.verdaccio.entrypoints=web"
+      - "traefik.http.routers.verdaccio.service=verdaccio"
+      - "traefik.http.routers.verdaccio.rule=Host(`verdaccio.localhost`)"
+      - "traefik.http.services.verdaccio.loadbalancer.server.port=4873"
+  mongodb:
+    image: mongo:6
+    container_name: mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "gedai"
+      MONGO_INITDB_ROOT_PASSWORD: "gedai"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.tcp.routers.mongodb.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.mongodb.entrypoints=mongodb"
+      - "traefik.tcp.services.mongodb.loadbalancer.server.port=27017"
+      - "traefik.tcp.routers.mongodb.service=mongodb"
+  postgresdb:
+    image: postgres:16
+    container_name: postgresdb
+    environment:
+      POSTGRES_USER: gedai
+      POSTGRES_PASSWORD: gedai
+    labels:
+      - "traefik.enable=true"
+      - "traefik.tcp.routers.postgresdb.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.postgresdb.entrypoints=postgresql"
+      - "traefik.tcp.services.postgresdb.loadbalancer.server.port=5432"
+      - "traefik.tcp.routers.postgresdb.service=postgresdb"
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: "gedai"
+      RABBITMQ_DEFAULT_PASS: "gedai"
+    labels:
+      - "traefik.enable=true"
+      # amqp protocol
+      - "traefik.tcp.routers.rabbitmq.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.rabbitmq.entrypoints=amqp"
+      - "traefik.tcp.services.rabbitmq.loadbalancer.server.port=5672"
+      - "traefik.tcp.routers.rabbitmq.service=rabbitmq"
+      # Web Management GUI
+      - "traefik.http.routers.rabbitmq-ui.entrypoints=web"
+      - "traefik.http.routers.rabbitmq-ui.service=rabbitmq-ui"
+      - "traefik.http.routers.rabbitmq-ui.rule=Host(`rabbitmq.localhost`)"
+      - "traefik.http.services.rabbitmq-ui.loadbalancer.server.port=15672"
+  index-tracker:
+    build:
+      context: .
+    container_name: index-tracker
+    labels:
+      - "traefik.enable=true"
+      # Web Management GUI
+      - "traefik.tcp.routers.index-tracker.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.index-tracker.entrypoints=index-tracker"
+      - "traefik.tcp.services.index-tracker.loadbalancer.server.port=3000"
+      - "traefik.tcp.routers.index-tracker.service=index-tracker"
